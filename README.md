@@ -8,7 +8,7 @@ It is wavelength-agnostic by design: useful for radio astronomy, amateur radio /
 
 ## try it
 
-Open [`geodish.html`](./geodish.html) directly in any modern browser.
+Open [`geodish.html`](https://zenmetsu.github.io/geodish/geodish.html) directly in any modern browser.
 
 ### controls
 
