@@ -28,7 +28,7 @@ This design descends from Yoshiyuki Takeyasu's (JA6XKQ) "Geodesic Parabola Anten
 .
 ├── README.md       this file
 ├── geodish.html    the tool itself — open this in a browser
-└── DishGen.hs      Haskell source that generates geodish.html
+└── geodish.hs      Haskell source that generates geodish.html
 ```
 
 `geodish.html` is generated output, not hand-edited directly — see below if you want to modify the tool itself.
