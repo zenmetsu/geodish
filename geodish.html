@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>geodish</title>
+<link href="https://fonts.googleapis.com/css2?family=VT323&family=Silkscreen&display=swap" rel="stylesheet">
+<style>
+  :root { --pxfont: 'VT323', 'Silkscreen', 'Courier New', monospace; }
+  html, body { background:#000; color:#fff; font-family: var(--pxfont); margin:0; padding:0; height:100%; overflow:hidden; }
+  #titleBar { text-align:center; padding:6px 0; background:#000;
+              color:#fff; letter-spacing:6px; font-family: var(--pxfont); font-size:1.8em; }
+  #outer { height: calc(100% - 40px); width:100%; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+  #screen { position:relative; background:#000; }
+  #c { display:block; width:100%; height:100%; image-rendering:pixelated; image-rendering:crisp-edges; cursor:grab; }
+  #c.dragging { cursor:grabbing; }
+
+  .overlay { position:absolute; color:#fff; font-family: var(--pxfont);
+             text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; }
+  #paramsBox { top:0.2em; left:0.2em; }
+  #resultsBox { top:0.2em; right:0.2em; }
+  #legendBox { bottom:0.8em; left:50%; transform:translateX(-50%); width: 94%; }
+  .legendRow { display:flex; align-items:center; height:3.4em; margin-top:0.35em; }
+  .legendRowLabel { width:9ch; flex-shrink:0; font-family: var(--pxfont); font-size:1em; color:#aaa; }
+  .legendRow canvas { flex:1; width:100%; height:100%; display:block;
+                       image-rendering:pixelated; image-rendering:crisp-edges; }
+
+  .consoleLine { display:flex; align-items:baseline; white-space:nowrap; color:#0ff; line-height:0.65; }
+  .padRow { margin-top:0.55em; }
+  .consoleLabel { display:inline-block; width: 15ch; margin-right:0.6em; }
+  .stepChar { color:#0ff; cursor:pointer; padding:0 0.25em; user-select:none; }
+  .stepChar:active { color:#fff; }
+  .consoleVal { background:transparent; border:none; color:#ff0; font-family: var(--pxfont);
+                font-size:1em; text-align:center; width:6ch; outline:none; padding:0; margin:0;
+                line-height:0.65; height:1em; vertical-align:baseline; box-sizing:content-box; }
+  .consoleClick { cursor:pointer; }
+  .consoleClick:active { color:#fff; }
+
+  .resVal2 { color:#ff0; }
+
+  .legendLabel { font-family: var(--pxfont); font-size:1em; color:#aaa; margin-top:0.05em; text-align:center; }
+</style>
+</head>
+<body>
+<div id="titleBar">geodish</div>
+<div id="outer">
+  <div id="screen">
+    <canvas id="c" width="640" height="480"></canvas>
+
+    <div class="overlay" id="paramsBox">
+      <div class="consoleLine"><span class="consoleLabel">stock len (mm)</span><span class="stepChar" data-target="pALen" data-step="10" data-min="10">&lt;</span><input class="consoleVal" id="pALen" value="1000"><span class="stepChar" data-target="pALen" data-step="10" data-min="10" data-dir="1">&gt;</span></div>
+      <div class="consoleLine"><span class="consoleLabel">f/D ratio</span><span class="stepChar" data-target="pFD" data-step="0.01" data-min="0.05" data-max="5">&lt;</span><input class="consoleVal" id="pFD" value="0.35"><span class="stepChar" data-target="pFD" data-step="0.01" data-min="0.05" data-max="5" data-dir="1">&gt;</span></div>
+      <div class="consoleLine"><span class="consoleLabel">spoke count</span><span class="stepChar" data-target="pN" data-step="2" data-min="4" data-max="64" data-int="1">&lt;</span><input class="consoleVal" id="pN" value="6"><span class="stepChar" data-target="pN" data-step="2" data-min="4" data-max="64" data-int="1" data-dir="1">&gt;</span></div>
+      <div class="consoleLine"><span class="consoleLabel">inner ring pos</span><span class="stepChar" data-target="pFrac" data-step="0.01" data-min="0.05" data-max="0.95">&lt;</span><input class="consoleVal" id="pFrac" value="0.649"><span class="stepChar" data-target="pFrac" data-step="0.01" data-min="0.05" data-max="0.95" data-dir="1">&gt;</span><span class="consoleClick" id="btnOptimize" style="color:#ff0; margin-left:0.8em;">optimize</span></div>
+      <div class="consoleLine"><span class="consoleLabel">freq (MHz)</span><span class="stepChar" data-target="pFreq" data-step="1" data-min="1">&lt;</span><input class="consoleVal" id="pFreq" value="1420.405"><span class="stepChar" data-target="pFreq" data-step="1" data-min="1" data-dir="1">&gt;</span></div>
+      <div class="consoleLine consoleClick padRow" id="toggleRevY"></div>
+      <div class="consoleLine consoleClick padRow" id="toggleRevZoom"></div>
+      <div class="consoleLine consoleClick padRow" id="toggleIso"></div>
+    </div>
+
+    <div class="overlay" id="resultsBox">
+      <div class="consoleLine padRow"><span class="consoleLabel">aperture</span><span class="resVal2" id="resD"></span></div>
+      <div class="consoleLine padRow"><span class="consoleLabel">focal len</span><span class="resVal2" id="resF"></span></div>
+      <div class="consoleLine padRow"><span class="consoleLabel">f/D</span><span class="resVal2" id="resFD"></span></div>
+      <div class="consoleLine padRow"><span class="consoleLabel">wavelength</span><span class="resVal2" id="resLambda"></span></div>
+      <div class="consoleLine padRow"><span class="consoleLabel">beam angle</span><span class="resVal2" id="resBeam"></span></div>
+      <div class="consoleLine padRow"><span class="consoleLabel">illum angle</span><span class="resVal2" id="resIllum"></span></div>
+    </div>
+
+    <div class="overlay" id="legendBox">
+      <div class="legendRow"><div class="legendRowLabel" id="legendLabelA"></div><canvas id="legendA" width="1600" height="90"></canvas></div>
+      <div class="legendRow"><div class="legendRowLabel" id="legendLabelB"></div><canvas id="legendB" width="1600" height="90"></canvas></div>
+      <div class="legendRow"><div class="legendRowLabel" id="legendLabelC"></div><canvas id="legendC" width="1600" height="90"></canvas></div>
+    </div>
+  </div>
+</div>
+<script>
+"use strict";
+
+// ============ Geometry ============
+function zOf(f, r) { return (r*r) / (4*f); }
+function arcLength(f, r) {
+  const u = r / (2*f);
+  return (r/2) * Math.sqrt(1 + u*u) + f * Math.asinh(u);
+}
+function darcLength(f, r) {
+  const u = r / (2*f);
+  return Math.sqrt(1 + u*u);
+}
+function radiusForArc(f, s) {
+  let r = s;
+  for (let n = 0; n < 60; n++) {
+    const residual = arcLength(f, r) - s;
+    if (Math.abs(residual) < 1e-9 * Math.max(1, s)) break;
+    r = Math.max(0, r - residual / darcLength(f, r));
+  }
+  return r;
+}
+function node3D(f, r, theta) { return [r*Math.cos(theta), r*Math.sin(theta), zOf(f, r)]; }
+function dist3(a, b) {
+  const dx = a[0]-b[0], dy = a[1]-b[1], dz = a[2]-b[2];
+  return Math.sqrt(dx*dx + dy*dy + dz*dz);
+}
+function mid3(a, b) { return [(a[0]+b[0])/2, (a[1]+b[1])/2, (a[2]+b[2])/2]; }
+function buildDish(diameter, fOverD, N, innerFrac) {
+  const f = fOverD * diameter;
+  const r2 = diameter / 2;
+  const s2 = arcLength(f, r2);
+  const s1 = innerFrac * s2;
+  const r1 = radiusForArc(f, s1);
+  return {N, f, s1, s2, r1, r2, diameter, fOverD};
+}
+function diameterFromALength(aTotalLen, fOverD) {
+  const Dref = 2;
+  const fRef = fOverD * Dref;
+  const s2Ref = arcLength(fRef, 1);
+  const s2Target = aTotalLen / 2;
+  return Dref * (s2Target / s2Ref);
+}
+function spokeAngle(d, k) { return 2*Math.PI*k/d.N; }
+function bisectorAngle(d, k) { return spokeAngle(d,k) + Math.PI/d.N; }
+function innerNode(d,k){ return node3D(d.f, d.r1, spokeAngle(d,k)); }
+function rimAligned(d,k){ return node3D(d.f, d.r2, spokeAngle(d,k)); }
+function rimBisector(d,k){ return node3D(d.f, d.r2, bisectorAngle(d,k)); }
+function hubNode(){ return [0,0,0]; }
+
+// ============ Colors ============
+const COL_A_INNER = "#fff";
+const COL_A_OUTER = "#aaa";
+const COL_B_RING  = "#0ff";
+const COL_B_LEG   = "#f0f";
+const COL_C       = "#ff0";
+const CYCLE = ["#fff", "#0ff", "#ff0", "#f0f"];
+function cyclingColor(t) { return CYCLE[Math.floor(t / 75) % 4]; }
+function cyclingColorSlow(t) { return CYCLE[Math.floor(t / 150) % 4]; }
+
+// ============ Camera ============
+let azimuth = 0.9;
+let elevation = 0.55;
+let reverseY = false;
+let reverseZoom = false;
+let zoom = 1.8;
+let isoMode = false;
+let uiScale = 1; // set by resizeCanvas(); the one shared scale factor for all text and legend canvases
+const BASE_PX = 13; // the single font-size (in "unscaled" pixels) shared by every piece of on-screen text
+
+function project(pt, w, h, dist) {
+  let [x,y,z] = pt;
+
+  const ca = Math.cos(azimuth), sa = Math.sin(azimuth);
+  const ce = Math.cos(elevation), se = Math.sin(elevation);
+
+  const x1 = x*ca - y*sa;
+  const y1 = x*sa + y*ca;
+  const z1 = z;
+
+  const y2 = y1*ce - z1*se;
+  const z2 = y1*se + z1*ce;
+
+  const scale = zoom * 0.42 * Math.min(w,h) / dist;
+  const persp = isoMode ? 1 : (1 / (1 + y2 / (dist*2.2)));
+  const sx = w/2 + x1 * scale * persp;
+  const sy = h/2 - z2 * scale * persp;
+  return [sx, sy, y2];
+}
+
+// ============ Rendering ============
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let segments = [];
+
+function line(p1, p2, color, width, group) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width || 1;
+  ctx.beginPath();
+  ctx.moveTo(p1[0], p1[1]);
+  ctx.lineTo(p2[0], p2[1]);
+  ctx.stroke();
+  if (group) segments.push({x1:p1[0], y1:p1[1], x2:p2[0], y2:p2[1], group});
+}
+function dot(p, color, r) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(p[0], p[1], r||2, 0, 2*Math.PI);
+  ctx.fill();
+}
+function text(p, str, color) {
+  const fpx = BASE_PX;
+  ctx.font = fpx + "px 'VT323', 'Silkscreen', monospace";
+  const wpx = ctx.measureText(str).width;
+  ctx.fillStyle = "rgba(0,0,0,0.75)";
+  ctx.fillRect(p[0]-wpx/2-2, p[1]-fpx*0.9, wpx+4, fpx*1.05);
+  ctx.fillStyle = color;
+  ctx.textAlign = "center";
+  ctx.fillText(str, p[0], p[1]-1);
+  ctx.textAlign = "left";
+}
+
+let hoveredGroup = null;
+
+function drawLine(p1screen, p2screen, baseColor, baseWidth, group, time) {
+  const isHi = hoveredGroup !== null && group === hoveredGroup;
+  const col = isHi ? cyclingColor(time) : baseColor;
+  const w   = baseWidth;
+  line(p1screen, p2screen, col, w, group);
+}
+
+function val(id, fallback) {
+  const v = parseFloat(document.getElementById(id).value);
+  return isFinite(v) ? v : fallback;
+}
+
+function draw(time) {
+  if (typeof time !== 'number') time = Date.now();
+  const w = canvas.width, h = canvas.height;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0,0,w,h);
+  segments = [];
+
+  const ALEN = val('pALen', 1000);
+  const FD = val('pFD', 0.35);
+  const N = Math.max(4, Math.round(val('pN', 6)));
+  const FRAC = Math.min(0.95, Math.max(0.05, val('pFrac', 0.649)));
+  const FREQ = Math.max(1, val('pFreq', 1420.405));
+  document.getElementById('toggleRevY').textContent = (reverseY ? "[x] " : "[ ] ") + "reverse y-axis";
+  document.getElementById('toggleRevZoom').textContent = (reverseZoom ? "[x] " : "[ ] ") + "reverse zoom";
+  document.getElementById('toggleIso').textContent = (isoMode ? "[x] " : "[ ] ") + "isometric";
+
+  const D = diameterFromALength(ALEN, FD);
+  const d = buildDish(D, FD, N, FRAC);
+  const camDist = D * 2.0;
+  const P = (pt) => project(pt, w, h, camDist);
+
+  const axisLen = D * 0.75;
+  const Xp = P([axisLen,0,0]), Xn = P([-axisLen,0,0]);
+  const Yp = P([0,axisLen,0]), Yn = P([0,-axisLen,0]);
+  const Zp = P([0,0,axisLen]), Zn = P([0,0,-axisLen*0.15]);
+
+  line(Xn, Xp, "#0ff", 1);
+  line(Yn, Yp, "#f0f", 1);
+  line(Zn, Zp, "#ff0", 1);
+  text(Xp, "x", "#0ff");
+  text(Yp, "y", "#f0f");
+  text(Zp, "z", "#ff0");
+
+  const nTicks = 5;
+  ctx.fillStyle = "#fff";
+  for (let i=1;i<=nTicks;i++) {
+    const t = (D/2) * i / nTicks;
+    for (const axisVec of [[t,0,0],[0,t,0],[0,0,t]]) {
+      const p = P(axisVec);
+      ctx.fillRect(p[0]-1, p[1]-1, 2, 2);
+    }
+  }
+
+  const apPts = [];
+  for (let k=0;k<=64;k++) {
+    const th = 2*Math.PI*k/64;
+    apPts.push(P([d.r2*Math.cos(th), d.r2*Math.sin(th), 0]));
+  }
+  ctx.strokeStyle = "#666";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4,3]);
+  ctx.beginPath();
+  apPts.forEach((p,i)=> i===0 ? ctx.moveTo(p[0],p[1]) : ctx.lineTo(p[0],p[1]));
+  ctx.stroke();
+  ctx.setLineDash([]);
+  text(P([d.r2,0,0]), "D=" + D.toFixed(0) + "mm", "#ccc");
+  text(P([0,d.r2,0]), "f/D=" + (d.f/D).toFixed(3), "#ccc");
+
+  // psi = half-angle from focus to rim (standard parabolic-feed formula),
+  // computed once here and reused for both the focal-point label and the
+  // cone drawn below, plus the results-panel readout further down.
+  const psi = 2 * Math.atan(1 / (4 * (d.f / D)));
+  const illumFullDeg = 2 * psi * 180 / Math.PI;
+
+  const focalScreen = P([0,0,d.f]);
+  const focalCol = cyclingColorSlow(time); // deliberately the slower rate, to stay visually distinct from hover highlights
+  dot(focalScreen, focalCol, 4);
+  text([focalScreen[0], focalScreen[1]-8], "f=" + d.f.toFixed(0) + "mm  " + illumFullDeg.toFixed(0) + "deg", focalCol);
+
+  // ---- illumination cone: a short visual cue only (not drawn all the
+  // way to the rim, which would clutter the view) -- same half-angle
+  // psi as above, just truncated to ~12% of the focus-to-rim distance.
+  {
+    const focus3 = [0, 0, d.f];
+    const fullLen = dist3(focus3, [d.r2, 0, zOf(d.f, d.r2)]); // true focus-to-rim distance
+    const coneLen = 0.12 * fullLen;
+    const cCol = cyclingColorSlow(time);
+    const nCone = 16;
+    const conePts = [];
+    for (let i = 0; i < nCone; i++) {
+      const phi = 2 * Math.PI * i / nCone;
+      const dir = [Math.sin(psi)*Math.cos(phi), Math.sin(psi)*Math.sin(phi), -Math.cos(psi)];
+      const pt3 = [focus3[0]+coneLen*dir[0], focus3[1]+coneLen*dir[1], focus3[2]+coneLen*dir[2]];
+      conePts.push(P(pt3));
+    }
+    // spokes from focus
+    for (let i = 0; i < nCone; i += 2) {
+      line(focalScreen, conePts[i], cCol, 1);
+    }
+    // base circle
+    for (let i = 0; i < nCone; i++) {
+      line(conePts[i], conePts[(i+1)%nCone], cCol, 1);
+    }
+
+  }
+
+  const hub3 = P(hubNode());
+  const halfN = N / 2;
+
+  for (let k=0;k<N;k++) {
+    const inn = P(innerNode(d,k));
+    const rim = P(rimAligned(d,k));
+    const group = "A_" + (k % halfN);
+    drawLine(hub3, inn, COL_A_INNER, 2.5, group, time);
+    drawLine(inn, rim, COL_A_OUTER, 2.5, group, time);
+    dot(inn, COL_A_INNER, 2);
+    dot(rim, COL_A_OUTER, 2);
+  }
+  dot(hub3, COL_A_INNER, 3);
+
+  for (let k=0;k<N;k++) {
+    const bi  = P(rimBisector(d,k));
+    const in0 = P(innerNode(d,k));
+    const in1 = P(innerNode(d,(k+1)%N));
+    const groupLeg1 = "B_" + ((k - 1 + N) % N);
+    const groupRing = "B_" + k;
+    const groupLeg2 = "B_" + ((k + 1) % N);
+    drawLine(bi, in0, COL_B_LEG, 1.8, groupLeg1, time);
+    drawLine(bi, in1, COL_B_LEG, 1.8, groupLeg2, time);
+    drawLine(in0, in1, COL_B_RING, 1.8, groupRing, time);
+  }
+
+  for (let k=0;k<N;k++) {
+    const ra  = P(rimAligned(d,k));
+    const rb  = P(rimBisector(d,k));
+    const ra2 = P(rimAligned(d,(k+1)%N));
+    drawLine(ra, rb, COL_C, 1.5, "C_" + k + "_1", time);
+    drawLine(rb, ra2, COL_C, 1.5, "C_" + k + "_2", time);
+    dot(rb, COL_C, 2);
+  }
+
+  const aLen1 = d.s1;
+  const aLen2 = d.s2 - d.s1;
+  const bOuter = dist3(rimBisector(d,0), innerNode(d,0));
+  const bInner = dist3(innerNode(d,0), innerNode(d,1));
+  const cLen  = dist3(rimAligned(d,0), rimBisector(d,0));
+
+  text(P(mid3(hubNode(), innerNode(d,0))),        aLen1.toFixed(0)+"mm",  COL_A_INNER);
+  text(P(mid3(innerNode(d,0), rimAligned(d,0))),  aLen2.toFixed(0)+"mm",  COL_A_OUTER);
+  text(P(mid3(innerNode(d,0), innerNode(d,1))),   bInner.toFixed(0)+"mm", COL_B_RING);
+  text(P(mid3(rimBisector(d,0), innerNode(d,0))), bOuter.toFixed(0)+"mm", COL_B_LEG);
+  text(P(mid3(rimAligned(d,0), rimBisector(d,0))),cLen.toFixed(0)+"mm",   COL_C);
+
+  // ---- results overlay ----
+  const lambdaMM = 299792.458 / FREQ;
+  const beamDeg = 70 * lambdaMM / D;
+  document.getElementById('resD').textContent = D.toFixed(1) + "mm";
+  document.getElementById('resF').textContent = d.f.toFixed(1) + "mm";
+  document.getElementById('resFD').textContent = (d.f/D).toFixed(3);
+  document.getElementById('resLambda').textContent = lambdaMM.toFixed(1) + "mm @ " + FREQ.toFixed(1) + "MHz";
+  document.getElementById('resBeam').textContent = "~" + beamDeg.toFixed(1) + "deg";
+  document.getElementById('resIllum').textContent = illumFullDeg.toFixed(1) + "deg";
+
+  drawLegends(d, aLen1, aLen2, bOuter, bInner, cLen, time);
+}
+
+function drawSchematic(canvasId, segLens, segColors, scalePxPerMm, time, isHoveredFn) {
+  const cv = document.getElementById(canvasId);
+  const c2 = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  c2.fillStyle = "#000";
+  c2.fillRect(0,0,W,H);
+  const baseLineW = 8;
+  const tickHalf = 1.5 * baseLineW; // total tick height = 3x the line width
+  const fontPx = 22;
+  const marginL = 16;
+  const yMid = tickHalf + fontPx + 8; // headroom above for the label so it never clips
+  let x = marginL;
+  const xs = [x];
+  const hoveredTickIdx = new Set();
+  for (const len of segLens) {
+    const nx = x + len * scalePxPerMm;
+    const hi = isHoveredFn && isHoveredFn(xs.length-1);
+    if (hi) { hoveredTickIdx.add(xs.length-1); hoveredTickIdx.add(xs.length); }
+    c2.strokeStyle = hi ? cyclingColor(time) : segColors[xs.length-1];
+    c2.lineWidth = baseLineW;
+    c2.beginPath();
+    c2.moveTo(x, yMid);
+    c2.lineTo(nx, yMid);
+    c2.stroke();
+    c2.fillStyle = "#ccc";
+    c2.font = fontPx + "px 'VT323', 'Silkscreen', monospace";
+    c2.textAlign = "center";
+    c2.textBaseline = "bottom";
+    c2.fillText(len.toFixed(0), (x+nx)/2, yMid - tickHalf - 4);
+    x = nx;
+    xs.push(x);
+  }
+  c2.textAlign = "left";
+  c2.textBaseline = "alphabetic";
+  c2.lineWidth = 3;
+  xs.forEach((hx, i) => {
+    // Hash marks bounding a currently-hovered/highlighted member are drawn
+    // yellow instead of plain white, to visually tie the tick marks to the
+    // same selection as the highlighted line and legend row.
+    c2.strokeStyle = hoveredTickIdx.has(i) ? "#ff0" : "#fff";
+    c2.beginPath();
+    c2.moveTo(hx, yMid - tickHalf);
+    c2.lineTo(hx, yMid + tickHalf);
+    c2.stroke();
+  });
+}
+
+function drawLegends(d, aLen1, aLen2, bOuter, bInner, cLen, time) {
+  const totalA = 2*(aLen1+aLen2);
+  const totalB = 2*bOuter + bInner;
+  const totalC = cLen;
+  const maxTotal = Math.max(totalA, totalB, totalC);
+  const usableW = 1600 - 40;
+  const scale = usableW / maxTotal;
+
+  const hoverA = hoveredGroup !== null && hoveredGroup.startsWith("A_");
+  const hoverB = hoveredGroup !== null && hoveredGroup.startsWith("B_");
+  const hoverC = hoveredGroup !== null && hoveredGroup.startsWith("C_");
+
+  drawSchematic("legendA", [aLen2, aLen1, aLen1, aLen2],
+    [COL_A_OUTER, COL_A_INNER, COL_A_INNER, COL_A_OUTER], scale, time, () => hoverA);
+  drawSchematic("legendB", [bOuter, bInner, bOuter],
+    [COL_B_LEG, COL_B_RING, COL_B_LEG], scale, time, () => hoverB);
+  drawSchematic("legendC", [cLen],
+    [COL_C], scale, time, () => hoverC);
+
+  document.getElementById('legendLabelA').textContent = "rib a (x" + (d.N/2) + ")";
+  document.getElementById('legendLabelB').textContent = "rib b (x" + d.N + ")";
+  document.getElementById('legendLabelC').textContent = "rib c (x" + (2*d.N) + ")";
+}
+
+// ============ Aspect-ratio-preserving screen sizing ============
+function resizeCanvas() {
+  const outer = document.getElementById('outer');
+  const screen = document.getElementById('screen');
+  const availW = outer.clientWidth, availH = outer.clientHeight;
+  const targetRatio = canvas.width / canvas.height;
+  let cw, ch;
+  if (availW / availH > targetRatio) { ch = availH; cw = ch * targetRatio; }
+  else { cw = availW; ch = cw / targetRatio; }
+  screen.style.width = cw + "px";
+  screen.style.height = ch + "px";
+  uiScale = cw / 640;
+  screen.style.fontSize = (uiScale * BASE_PX) + "px";
+}
+
+// ============ Mouse orbit + wheel zoom + hover hit-testing ============
+let dragging = false, lastX=0, lastY=0;
+canvas.addEventListener('mousedown', (e)=>{ dragging=true; lastX=e.clientX; lastY=e.clientY; canvas.classList.add('dragging'); });
+window.addEventListener('mouseup', ()=>{ dragging=false; canvas.classList.remove('dragging'); });
+
+function distToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2-x1, dy = y2-y1;
+  const lenSq = dx*dx + dy*dy;
+  let t = lenSq === 0 ? 0 : ((px-x1)*dx + (py-y1)*dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const cx = x1 + t*dx, cy = y1 + t*dy;
+  return Math.hypot(px-cx, py-cy);
+}
+
+window.addEventListener('mousemove', (e)=>{
+  if (dragging) {
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    azimuth += dx * 0.01;
+    elevation = Math.max(-1.5, Math.min(1.5, elevation + dy * 0.01 * (reverseY ? -1 : 1)));
+    return;
+  }
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+  const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top) * scaleY;
+  let best = null, bestDist = 8;
+  for (const s of segments) {
+    const dpx = distToSegment(mx, my, s.x1, s.y1, s.x2, s.y2);
+    if (dpx < bestDist) { bestDist = dpx; best = s.group; }
+  }
+  hoveredGroup = best;
+});
+
+canvas.addEventListener('wheel', (e)=>{
+  e.preventDefault();
+  const dir = (reverseZoom ? -1 : 1) * (e.deltaY > 0 ? -1 : 1);
+  zoom = Math.max(0.1, Math.min(20, zoom * (1 + dir * 0.1)));
+}, { passive:false });
+
+document.querySelectorAll('input').forEach(el => el.addEventListener('input', draw));
+window.addEventListener('resize', () => { resizeCanvas(); });
+
+document.getElementById('toggleRevY').addEventListener('click', () => { reverseY = !reverseY; });
+document.getElementById('toggleRevZoom').addEventListener('click', () => { reverseZoom = !reverseZoom; });
+document.getElementById('toggleIso').addEventListener('click', () => { isoMode = !isoMode; });
+
+// ============ Step controls (< / > characters, console-line style) ============
+document.querySelectorAll('.stepChar').forEach(el => {
+  el.addEventListener('click', () => {
+    const targetId = el.dataset.target;
+    const step = parseFloat(el.dataset.step);
+    const dir = el.dataset.dir === "1" ? 1 : -1;
+    const min = el.dataset.min !== undefined ? parseFloat(el.dataset.min) : undefined;
+    const max = el.dataset.max !== undefined ? parseFloat(el.dataset.max) : undefined;
+    const isInt = el.dataset.int === "1";
+    const inp = document.getElementById(targetId);
+    let v = parseFloat(inp.value);
+    if (!isFinite(v)) v = 0;
+    v += dir * step;
+    if (min !== undefined) v = Math.max(min, v);
+    if (max !== undefined) v = Math.min(max, v);
+    inp.value = isInt ? Math.round(v).toString() : parseFloat(v.toFixed(6)).toString();
+    draw();
+  });
+});
+
+// ============ "Optimize" button ============
+function bLengthDiff(D, fOverD, N, frac) {
+  const dd = buildDish(D, fOverD, N, frac);
+  const bOuter = dist3(rimBisector(dd,0), innerNode(dd,0));
+  const bInner = dist3(innerNode(dd,0), innerNode(dd,1));
+  return bOuter - bInner;
+}
+function optimizeFrac(D, fOverD, N) {
+  const lo0 = 0.05, hi0 = 0.95, steps = 80;
+  let prevF = lo0, prevG = bLengthDiff(D, fOverD, N, prevF);
+  let braLo = null, braHi = null;
+  for (let i = 1; i <= steps; i++) {
+    const f = lo0 + (hi0 - lo0) * i / steps;
+    const g = bLengthDiff(D, fOverD, N, f);
+    if (Math.sign(g) !== Math.sign(prevG) || g === 0) { braLo = prevF; braHi = f; break; }
+    prevF = f; prevG = g;
+  }
+  if (braLo === null) return null;
+  let lo = braLo, hi = braHi;
+  const glo0 = bLengthDiff(D, fOverD, N, lo);
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    const gmid = bLengthDiff(D, fOverD, N, mid);
+    if (Math.sign(gmid) === Math.sign(glo0)) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+document.getElementById('btnOptimize').addEventListener('click', () => {
+  const ALEN = val('pALen', 1000);
+  const FD = val('pFD', 0.35);
+  const N = Math.max(4, Math.round(val('pN', 6)));
+  const D = diameterFromALength(ALEN, FD);
+  const result = optimizeFrac(D, FD, N);
+  if (result !== null) {
+    document.getElementById('pFrac').value = result.toFixed(6);
+  }
+});
+
+// ============ Animation loop ============
+function loop(t) {
+  draw(t);
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(loop);
+}
+resizeCanvas();
+if (typeof requestAnimationFrame === 'function') requestAnimationFrame(loop);
+else draw();
+</script>
+</body>
+</html>
