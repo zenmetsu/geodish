@@ -55,6 +55,7 @@
       <div class="consoleLine consoleClick padRow" id="toggleRevY"></div>
       <div class="consoleLine consoleClick padRow" id="toggleRevZoom"></div>
       <div class="consoleLine consoleClick padRow" id="toggleIso"></div>
+      <div class="consoleLine consoleClick padRow" id="toggleSmooth"></div>
     </div>
 
     <div class="overlay" id="resultsBox">
@@ -101,6 +102,29 @@ function dist3(a, b) {
   return Math.sqrt(dx*dx + dy*dy + dz*dz);
 }
 function mid3(a, b) { return [(a[0]+b[0])/2, (a[1]+b[1])/2, (a[2]+b[2])/2]; }
+function sub3(a,b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+function add3(a,b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
+function scale3(a,s) { return [a[0]*s, a[1]*s, a[2]*s]; }
+function norm3(v) { return Math.hypot(v[0],v[1],v[2]); }
+function normalize3(v) { const n = norm3(v); return n < 1e-12 ? [0,0,0] : [v[0]/n, v[1]/n, v[2]/n]; }
+function cross3(a,b) { return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+function dot3(a,b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+
+// Given chord/arc-length ratio rho = chord/arcLen (in (0,1]), solve for the
+// circular arc's half-angle alpha via chord=2R sin(a), arcLen=2R*a, i.e.
+// sin(a)/a = rho. sinc(a) is monotonically decreasing on (0,pi), so a
+// simple bisection is robust here.
+function solveArcHalfAngle(rho) {
+  if (rho > 0.999999) return 1e-6;
+  if (rho < 1e-6) rho = 1e-6;
+  let lo = 1e-6, hi = Math.PI - 1e-6;
+  for (let i = 0; i < 80; i++) {
+    const mid = (lo+hi)/2;
+    const val = Math.sin(mid)/mid;
+    if (val > rho) lo = mid; else hi = mid;
+  }
+  return (lo+hi)/2;
+}
 function buildDish(diameter, fOverD, N, innerFrac) {
   const f = fOverD * diameter;
   const r2 = diameter / 2;
@@ -140,6 +164,7 @@ let reverseY = false;
 let reverseZoom = false;
 let zoom = 1.8;
 let isoMode = false;
+let smoothMode = false;
 let uiScale = 1; // set by resizeCanvas(); the one shared scale factor for all text and legend canvases
 const BASE_PX = 13; // the single font-size (in "unscaled" pixels) shared by every piece of on-screen text
 
@@ -196,14 +221,21 @@ function text(p, str, color) {
   ctx.textAlign = "left";
 }
 
-let hoveredGroup = null;
-
-function drawLine(p1screen, p2screen, baseColor, baseWidth, group, time) {
-  const isHi = hoveredGroup !== null && group === hoveredGroup;
-  const col = isHi ? cyclingColor(time) : baseColor;
-  const w   = baseWidth;
-  line(p1screen, p2screen, col, w, group);
+function catmullRomPoint(p0, p1, p2, p3, t) {
+  const t2 = t*t, t3 = t2*t;
+  const out = [0,0,0];
+  for (let i = 0; i < 3; i++) {
+    out[i] = 0.5 * (
+      (2*p1[i]) +
+      (-p0[i]+p2[i]) * t +
+      (2*p0[i]-5*p1[i]+4*p2[i]-p3[i]) * t2 +
+      (-p0[i]+3*p1[i]-3*p2[i]+p3[i]) * t3
+    );
+  }
+  return out;
 }
+
+let hoveredGroup = null;
 
 function val(id, fallback) {
   const v = parseFloat(document.getElementById(id).value);
@@ -225,6 +257,7 @@ function draw(time) {
   document.getElementById('toggleRevY').textContent = (reverseY ? "[x] " : "[ ] ") + "reverse y-axis";
   document.getElementById('toggleRevZoom').textContent = (reverseZoom ? "[x] " : "[ ] ") + "reverse zoom";
   document.getElementById('toggleIso').textContent = (isoMode ? "[x] " : "[ ] ") + "isometric";
+  document.getElementById('toggleSmooth').textContent = (smoothMode ? "[x] " : "[ ] ") + "smooth";
 
   const D = diameterFromALength(ALEN, FD);
   const d = buildDish(D, FD, N, FRAC);
@@ -306,39 +339,162 @@ function draw(time) {
 
   }
 
-  const hub3 = P(hubNode());
+  // drawMember: draws a rib segment between two TRUE 3D endpoints.
+  // In smooth mode, it samples many intermediate points along the
+  // straight x/y path between the endpoints and sets each point's z
+  // to the true local paraboloid height at that x/y -- this is exact
+  // for rib A (a genuine planar meridian, verified independently),
+  // and a physically-reasonable approximation for ribs B/C (which
+  // aren't confined to one flat plane, so there's no simple closed-
+  // form geodesic between their endpoints).
+  function drawMember(pt3a, pt3b, baseColor, baseWidth, group) {
+    const isHi = hoveredGroup !== null && group === hoveredGroup;
+    const col = isHi ? cyclingColor(time) : baseColor;
+    if (smoothMode) {
+      const steps = 20;
+      let prevScreen = P(pt3a);
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        const x = pt3a[0] + (pt3b[0]-pt3a[0])*t;
+        const y = pt3a[1] + (pt3b[1]-pt3a[1])*t;
+        const r = Math.hypot(x, y);
+        const z = zOf(d.f, r);
+        const curScreen = P([x, y, z]);
+        line(prevScreen, curScreen, col, baseWidth, group);
+        prevScreen = curScreen;
+      }
+    } else {
+      line(P(pt3a), P(pt3b), col, baseWidth, group);
+    }
+  }
+
+  const hub3D = hubNode();
+  const hubScreen = P(hub3D);
   const halfN = N / 2;
 
   for (let k=0;k<N;k++) {
-    const inn = P(innerNode(d,k));
-    const rim = P(rimAligned(d,k));
+    const inn3D = innerNode(d,k);
+    const rim3D = rimAligned(d,k);
     const group = "A_" + (k % halfN);
-    drawLine(hub3, inn, COL_A_INNER, 2.5, group, time);
-    drawLine(inn, rim, COL_A_OUTER, 2.5, group, time);
-    dot(inn, COL_A_INNER, 2);
-    dot(rim, COL_A_OUTER, 2);
+    drawMember(hub3D, inn3D, COL_A_INNER, 2.5, group);
+    drawMember(inn3D, rim3D, COL_A_OUTER, 2.5, group);
+    dot(P(inn3D), COL_A_INNER, 2);
+    dot(P(rim3D), COL_A_OUTER, 2);
   }
-  dot(hub3, COL_A_INNER, 3);
+  dot(hubScreen, COL_A_INNER, 3);
+
+  // Rib B: a single physical strip constrained at 4 real, fixed points --
+  // the two inner-ring/spoke intersections, and the two C-section junction
+  // points (the rim bisector nodes) on either side. In smooth mode this is
+  // rendered as ONE continuous Catmull-Rom curve through all 4 real points
+  // (exact at the control points, continuous across the internal joins),
+  // instead of independently z-projecting each of the 3 sub-segments --
+  // which gave each third of the piece an uncorrelated, "out of plane"
+  // bending character instead of one coherent curve.
+  function drawRibBSmooth(P0, P1, P2, P3, group) {
+    const pad = [P0, P0, P1, P2, P3, P3];
+    const stepsPerSeg = 14;
+    const isHi = hoveredGroup !== null && group === hoveredGroup;
+    for (let s = 0; s < 3; s++) {
+      const [a,b,c,e] = [pad[s], pad[s+1], pad[s+2], pad[s+3]];
+      const segCol = isHi ? cyclingColor(time) : COL_B_LEG_OR_RING(s);
+      let prevScreen = P(catmullRomPoint(a,b,c,e,0));
+      for (let i = 1; i <= stepsPerSeg; i++) {
+        const t = i / stepsPerSeg;
+        const curScreen = P(catmullRomPoint(a,b,c,e,t));
+        line(prevScreen, curScreen, segCol, 1.8, group);
+        prevScreen = curScreen;
+      }
+    }
+  }
+  function COL_B_LEG_OR_RING(segIndex) { return segIndex === 1 ? COL_B_RING : COL_B_LEG; }
 
   for (let k=0;k<N;k++) {
-    const bi  = P(rimBisector(d,k));
-    const in0 = P(innerNode(d,k));
-    const in1 = P(innerNode(d,(k+1)%N));
+    const bi3D  = rimBisector(d,k);
+    const in0_3D = innerNode(d,k);
+    const in1_3D = innerNode(d,(k+1)%N);
     const groupLeg1 = "B_" + ((k - 1 + N) % N);
     const groupRing = "B_" + k;
     const groupLeg2 = "B_" + ((k + 1) % N);
-    drawLine(bi, in0, COL_B_LEG, 1.8, groupLeg1, time);
-    drawLine(bi, in1, COL_B_LEG, 1.8, groupLeg2, time);
-    drawLine(in0, in1, COL_B_RING, 1.8, groupRing, time);
+    if (smoothMode) {
+      const biPrev = rimBisector(d, (k - 1 + N) % N);
+      const biNext = rimBisector(d, (k + 1) % N);
+      drawRibBSmooth(biPrev, in0_3D, in1_3D, biNext, groupRing);
+    } else {
+      drawMember(bi3D, in0_3D, COL_B_LEG, 1.8, groupLeg1);
+      drawMember(bi3D, in1_3D, COL_B_LEG, 1.8, groupLeg2);
+      drawMember(in0_3D, in1_3D, COL_B_RING, 1.8, groupRing);
+    }
+  }
+
+  // Rib C as a genuine circular arc (uniquely determined by chord length +
+  // true arc length -- no other free shape parameters, matching "circular
+  // since two points"). The bow DIRECTION is chosen normal to the local
+  // direction of the neighboring A-rib and B-rib members converging at
+  // this piece's two endpoints, then sign-flipped to point downward.
+  //
+  // CAVEAT: this tool currently computes rib C's own "length" as the
+  // straight-line distance between its two true endpoints (same number
+  // used in the cut-list report) -- there's no independently-derived TRUE
+  // arc length for C the way rib A has a genuine meridian arc length
+  // exceeding its straight radius. A circular arc needs arc-length >
+  // chord-length to have anything to bow with, so the MAGNITUDE below
+  // uses a small placeholder excess (0.5%) purely so the direction/shape
+  // is visible -- it is NOT derived from anything physically meaningful
+  // yet. The DIRECTION math is fully determined and verified; the bow
+  // depth is not, until there's a real answer for where C's true
+  // (longer-than-chord) material length should come from.
+  const C_ARC_EXCESS = 0.005; // placeholder only -- see caveat above
+
+  function drawCArc(P1, P2, refDir, baseColor, group) {
+    const isHi = hoveredGroup !== null && group === hoveredGroup;
+    const col = isHi ? cyclingColor(time) : baseColor;
+    const chordVec = sub3(P2, P1);
+    const chordLen = norm3(chordVec);
+    const u = normalize3(chordVec);
+    let v = cross3(u, refDir);
+    if (norm3(v) < 1e-9) v = cross3(u, [0,0,1]);
+    v = normalize3(v);
+    if (v[2] > 0) v = scale3(v, -1);
+
+    const trueLen = chordLen * (1 + C_ARC_EXCESS);
+    const rho = chordLen / trueLen;
+    const alpha = solveArcHalfAngle(rho);
+    const R = trueLen / (2*alpha);
+    const M = mid3(P1, P2);
+    const center = add3(M, scale3(v, -R*Math.cos(alpha)));
+
+    const steps = 16;
+    let prevScreen = P(P1);
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const theta = -alpha + 2*alpha*t;
+      const pt = add3(center, add3(scale3(u, R*Math.sin(theta)), scale3(v, R*Math.cos(theta))));
+      const curScreen = P(pt);
+      line(prevScreen, curScreen, col, 1.5, group);
+      prevScreen = curScreen;
+    }
   }
 
   for (let k=0;k<N;k++) {
-    const ra  = P(rimAligned(d,k));
-    const rb  = P(rimBisector(d,k));
-    const ra2 = P(rimAligned(d,(k+1)%N));
-    drawLine(ra, rb, COL_C, 1.5, "C_" + k + "_1", time);
-    drawLine(rb, ra2, COL_C, 1.5, "C_" + k + "_2", time);
-    dot(rb, COL_C, 2);
+    const ra3D  = rimAligned(d,k);
+    const rb3D  = rimBisector(d,k);
+    const ra2_3D = rimAligned(d,(k+1)%N);
+    if (smoothMode) {
+      const dirA1 = normalize3(sub3(ra3D, innerNode(d,k)));
+      const dirB1 = normalize3(sub3(rb3D, innerNode(d,k)));
+      const ref1 = normalize3(add3(dirA1, dirB1));
+      drawCArc(ra3D, rb3D, ref1, COL_C, "C_" + k + "_1");
+
+      const dirB2 = normalize3(sub3(rb3D, innerNode(d,(k+1)%N)));
+      const dirA2 = normalize3(sub3(ra2_3D, innerNode(d,(k+1)%N)));
+      const ref2 = normalize3(add3(dirB2, dirA2));
+      drawCArc(rb3D, ra2_3D, ref2, COL_C, "C_" + k + "_2");
+    } else {
+      line(P(ra3D), P(rb3D), COL_C, 1.5, "C_" + k + "_1");
+      line(P(rb3D), P(ra2_3D), COL_C, 1.5, "C_" + k + "_2");
+    }
+    dot(P(rb3D), COL_C, 2);
   }
 
   const aLen1 = d.s1;
@@ -499,6 +655,7 @@ window.addEventListener('resize', () => { resizeCanvas(); });
 document.getElementById('toggleRevY').addEventListener('click', () => { reverseY = !reverseY; });
 document.getElementById('toggleRevZoom').addEventListener('click', () => { reverseZoom = !reverseZoom; });
 document.getElementById('toggleIso').addEventListener('click', () => { isoMode = !isoMode; });
+document.getElementById('toggleSmooth').addEventListener('click', () => { smoothMode = !smoothMode; });
 
 // ============ Step controls (< / > characters, console-line style) ============
 document.querySelectorAll('.stepChar').forEach(el => {
